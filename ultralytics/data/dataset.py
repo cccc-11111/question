@@ -119,11 +119,15 @@ class YOLODataset(BaseDataset):
             raise FileNotFoundError(f"Depth image not found for {im_file} under {root}")
         return None
 
-    @staticmethod
-    def _read_depth(path: Path) -> np.ndarray:
+    def _read_depth(self, path: Path) -> np.ndarray:
         depth = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
         if depth is None:
             raise FileNotFoundError(f"Unable to read depth image: {path}")
+        depth_channels = int(self.data.get("depth_channels", 0) or 0)
+        if depth_channels == 1 and depth.ndim == 3:
+            depth = cv2.cvtColor(depth, cv2.COLOR_BGR2GRAY)
+        elif depth_channels == 3 and depth.ndim == 2:
+            depth = cv2.cvtColor(depth, cv2.COLOR_GRAY2BGR)
         if depth.ndim == 2:
             depth = depth[..., None]
         elif depth.shape[2] == 4:
