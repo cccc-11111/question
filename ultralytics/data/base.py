@@ -385,6 +385,16 @@ class BaseDataset(Dataset):
         label = deepcopy(self.labels[index])  # requires deepcopy() https://github.com/ultralytics/ultralytics/pull/1948
         label.pop("shape", None)  # shape is for rect, remove it
         label["img"], label["ori_shape"], label["resized_shape"] = self.load_image(index)
+        if hasattr(self, "_depth_file"):
+            depth_file = self._depth_file(label["im_file"])
+            if depth_file is not None:
+                label["depth_file"] = str(depth_file)
+                label["depth_img"] = self._read_depth(depth_file)
+                if label["depth_img"].shape[:2] != label["resized_shape"]:
+                    h, w = label["resized_shape"]
+                    label["depth_img"] = cv2.resize(label["depth_img"], (w, h), interpolation=cv2.INTER_LINEAR)
+                    if label["depth_img"].ndim == 2:
+                        label["depth_img"] = label["depth_img"][..., None]
         label["ratio_pad"] = (
             label["resized_shape"][0] / label["ori_shape"][0],
             label["resized_shape"][1] / label["ori_shape"][1],

@@ -29,6 +29,7 @@ from ultralytics.nn.modules import (
     ADown,
     Bottleneck,
     BottleneckCSP,
+    BypassCNN,
     C2f,
     C2fAttn,
     C2fCIB,
@@ -166,6 +167,10 @@ class BaseModel(torch.nn.Module):
         Returns:
             (torch.Tensor): The last output of the model.
         """
+        depth = None
+        if isinstance(x, (tuple, list)) and len(x) == 2 and isinstance(x[0], torch.Tensor):
+            x, depth = x
+        image = x
         y, dt, embeddings = [], [], []  # outputs
         embed = frozenset(embed) if embed is not None else {-1}
         max_idx = max(embed)
@@ -174,7 +179,7 @@ class BaseModel(torch.nn.Module):
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
             if profile:
                 self._profile_one_layer(m, x, dt)
-            x = m(x)  # run
+            x = m(depth if depth is not None else image) if isinstance(m, BypassCNN) else m(x)  # run
             y.append(x if m.i in self.save else None)  # save output
             if visualize:
                 feature_visualization(x, m.type, m.i, save_dir=visualize)
@@ -325,7 +330,7 @@ class BaseModel(torch.nn.Module):
             self.criterion = self.init_criterion()
 
         if preds is None:
-            preds = self.forward(batch["img"])
+            preds = self.predict((batch["img"], batch["depth_img"])) if "depth_img" in batch else self.forward(batch["img"])
         return self.criterion(preds, batch)
 
     def init_criterion(self):
@@ -1642,6 +1647,8 @@ def parse_model(d, ch, verbose=True):
             c2 = ch[f[-1]]
         elif m is DINOBackbone:
             c2 = args[3] if len(args) > 3 else [256, 512, 1024]
+        elif m is BypassCNN:
+            c2 = [args[1] * 2, args[1] * 4] if len(args) > 1 else [128, 256]
         elif m in frozenset({TorchVision, Index}):
             c2 = args[0]
             c1 = ch[f]

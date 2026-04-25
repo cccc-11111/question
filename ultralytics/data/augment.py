@@ -1528,11 +1528,15 @@ class RandomFlip:
         # WARNING: two separate if and calls to random.random() intentional for reproducibility with older versions
         if self.direction == "vertical" and random.random() < self.p:
             img = np.flipud(img)
+            if "depth_img" in labels:
+                labels["depth_img"] = np.flipud(labels["depth_img"])
             instances.flipud(h)
             if self.flip_idx is not None and instances.keypoints is not None:
                 instances.keypoints = np.ascontiguousarray(instances.keypoints[:, self.flip_idx, :])
         if self.direction == "horizontal" and random.random() < self.p:
             img = np.fliplr(img)
+            if "depth_img" in labels:
+                labels["depth_img"] = np.fliplr(labels["depth_img"])
             instances.fliplr(w)
             if self.flip_idx is not None and instances.keypoints is not None:
                 instances.keypoints = np.ascontiguousarray(instances.keypoints[:, self.flip_idx, :])
@@ -1667,6 +1671,14 @@ class LetterBox:
             img = cv2.resize(img, new_unpad, interpolation=self.interpolation)
             if img.ndim == 2:
                 img = img[..., None]
+        depth_img = labels.get("depth_img")
+        if depth_img is not None:
+            if depth_img.shape[:2] != shape:
+                raise ValueError(f"Depth image shape {depth_img.shape[:2]} does not match RGB image shape {shape}")
+            if shape[::-1] != new_unpad:
+                depth_img = cv2.resize(depth_img, new_unpad, interpolation=self.interpolation)
+                if depth_img.ndim == 2:
+                    depth_img = depth_img[..., None]
 
         top, bottom = round(dh - 0.1) if self.center else 0, round(dh + 0.1)
         left, right = round(dw - 0.1) if self.center else 0, round(dw + 0.1)
@@ -1679,6 +1691,17 @@ class LetterBox:
             pad_img = np.full((h + top + bottom, w + left + right, c), fill_value=self.padding_value, dtype=img.dtype)
             pad_img[top : top + h, left : left + w] = img
             img = pad_img
+        if depth_img is not None:
+            dh0, dw0 = depth_img.shape[:2]
+            dc = 1 if depth_img.ndim == 2 else depth_img.shape[2]
+            if dc == 3:
+                depth_img = cv2.copyMakeBorder(
+                    depth_img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(0, 0, 0)
+                )
+            else:
+                pad_depth = np.zeros((dh0 + top + bottom, dw0 + left + right, dc), dtype=depth_img.dtype)
+                pad_depth[top : top + dh0, left : left + dw0] = depth_img
+                depth_img = pad_depth
 
         if labels.get("ratio_pad"):
             labels["ratio_pad"] = (labels["ratio_pad"], (left, top))  # for evaluation
@@ -1686,6 +1709,8 @@ class LetterBox:
         if len(labels):
             labels = self._update_labels(labels, ratio, left, top)
             labels["img"] = img
+            if depth_img is not None:
+                labels["depth_img"] = depth_img
             labels["resized_shape"] = new_shape
             return labels
         else:
@@ -2126,6 +2151,7 @@ class Format:
             >>> print(formatted_labels.keys())
         """
         img = labels.pop("img")
+        depth_img = labels.pop("depth_img", None)
         h, w = img.shape[:2]
         cls = labels.pop("cls")
         instances = labels.pop("instances")
@@ -2143,6 +2169,8 @@ class Format:
                 )
             labels["masks"] = masks
         labels["img"] = self._format_img(img)
+        if depth_img is not None:
+            labels["depth_img"] = self._format_depth(depth_img)
         labels["cls"] = torch.from_numpy(cls) if nl else torch.zeros(nl, 1)
         labels["bboxes"] = torch.from_numpy(instances.bboxes) if nl else torch.zeros((nl, 4))
         if self.return_keypoint:
@@ -2194,6 +2222,13 @@ class Format:
         img = np.ascontiguousarray(img[::-1] if random.uniform(0, 1) > self.bgr and img.shape[0] == 3 else img)
         img = torch.from_numpy(img)
         return img
+
+    @staticmethod
+    def _format_depth(img: np.ndarray) -> torch.Tensor:
+        if len(img.shape) < 3:
+            img = np.expand_dims(img, -1)
+        img = np.ascontiguousarray(img.transpose(2, 0, 1))
+        return torch.from_numpy(img)
 
     def _format_segments(
         self, instances: Instances, cls: np.ndarray, w: int, h: int

@@ -117,6 +117,8 @@ class DetectionTrainer(BaseTrainer):
             if isinstance(v, torch.Tensor):
                 batch[k] = v.to(self.device, non_blocking=self.device.type == "cuda")
         batch["img"] = batch["img"].float() / 255
+        if "depth_img" in batch:
+            batch["depth_img"] = batch["depth_img"].float() / 255
         if self.args.multi_scale:
             imgs = batch["img"]
             sz = (
@@ -131,6 +133,10 @@ class DetectionTrainer(BaseTrainer):
                 ]  # new shape (stretched to gs-multiple)
                 imgs = nn.functional.interpolate(imgs, size=ns, mode="bilinear", align_corners=False)
             batch["img"] = imgs
+            if "depth_img" in batch:
+                batch["depth_img"] = nn.functional.interpolate(
+                    batch["depth_img"], size=imgs.shape[2:], mode="bilinear", align_corners=False
+                )
         return batch
 
     def set_model_attributes(self):

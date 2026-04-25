@@ -647,11 +647,13 @@ class AutoBackend(nn.Module):
         Returns:
             (torch.Tensor | list[torch.Tensor]): The raw output tensor(s) from the model.
         """
-        _b, _ch, h, w = im.shape  # batch, channel, height, width
-        if self.fp16 and im.dtype != torch.float16:
-            im = im.half()  # to FP16
+        im0 = im[0] if isinstance(im, (tuple, list)) else im
+        _b, _ch, h, w = im0.shape  # batch, channel, height, width
+        if self.fp16 and im0.dtype != torch.float16:
+            im = tuple(x.half() for x in im) if isinstance(im, (tuple, list)) else im.half()  # to FP16
+            im0 = im[0] if isinstance(im, (tuple, list)) else im
         if self.nhwc:
-            im = im.permute(0, 2, 3, 1)  # torch BCHW to numpy BHWC shape(1,320,192,3)
+            im = im0.permute(0, 2, 3, 1)  # torch BCHW to numpy BHWC shape(1,320,192,3)
 
         # PyTorch
         if self.pt or self.nn_module:
@@ -663,25 +665,24 @@ class AutoBackend(nn.Module):
 
         # ONNX OpenCV DNN
         elif self.dnn:
-            im = im.cpu().numpy()  # torch to numpy
+            im = im0.cpu().numpy()  # torch to numpy
             self.net.setInput(im)
             y = self.net.forward()
 
         # ONNX Runtime
         elif self.onnx or self.imx:
             if self.dynamic:
-                im = im.cpu().numpy()  # torch to numpy
+                im = im0.cpu().numpy()  # torch to numpy
                 y = self.session.run(self.output_names, {self.session.get_inputs()[0].name: im})
             else:
-                if not self.cuda:
-                    im = im.cpu()
+                im_bind = im0.cpu() if not self.cuda else im0
                 self.io.bind_input(
                     name="images",
-                    device_type=im.device.type,
-                    device_id=im.device.index if im.device.type == "cuda" else 0,
+                    device_type=im_bind.device.type,
+                    device_id=im_bind.device.index if im_bind.device.type == "cuda" else 0,
                     element_type=np.float16 if self.fp16 else np.float32,
-                    shape=tuple(im.shape),
-                    buffer_ptr=im.data_ptr(),
+                    shape=tuple(im_bind.shape),
+                    buffer_ptr=im_bind.data_ptr(),
                 )
                 self.session.run_with_iobinding(self.io)
                 y = self.bindings

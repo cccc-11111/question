@@ -1,0 +1,14 @@
+path: F:/YOLO/YOLO_custom/yolo-dinobackbone-bypassdepth/seg_data_yolo/images
+train: F:/YOLO/YOLO_custom/yolo-dinobackbone-bypassdepth/seg_data_yolo/images/train
+val: F:/YOLO/YOLO_custom/yolo-dinobackbone-bypassdepth/seg_data_yolo/images/val
+test: F:/YOLO/YOLO_custom/yolo-dinobackbone-bypassdepth/seg_data_yolo/images/test
+
+depth_train: F:/YOLO/YOLO_custom/yolo-dinobackbone-bypassdepth/depth_data/depth_train
+depth_valid: F:/YOLO/YOLO_custom/yolo-dinobackbone-bypassdepth/depth_data/depth_valid
+depth_test: F:/YOLO/YOLO_custom/yolo-dinobackbone-bypassdepth/depth_data/depth_test
+depth_channels: 3
+
+names:
+  0: bud
+  1: leaf
+  2: flower

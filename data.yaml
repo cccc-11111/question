@@ -1,0 +1,12 @@
+
+path: /root/workspace/experiment/yolo/seg_data_yolo/images
+train: /root/workspace/experiment/yolo/seg_data_yolo/images/train
+val: /root/workspace/experiment/yolo/seg_data_yolo/images/val
+test: /root/workspace/experiment/yolo/seg_data_yolo/images/test 
+
+# Classes
+names:
+  0: bud
+  1: leaf
+  2: flower
+

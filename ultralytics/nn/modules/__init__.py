@@ -76,6 +76,7 @@ from .conv import (
     RepConv,
     SpatialAttention,
 )
+from .bypass import BypassCNN
 from .dino import DINOBackbone
 from .head import (
     OBB,
@@ -127,6 +128,7 @@ __all__ = (
     "BNContrastiveHead",
     "Bottleneck",
     "BottleneckCSP",
+    "BypassCNN",
     "C2f",
     "C2fAttn",
     "C2fCIB",

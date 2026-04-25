@@ -73,6 +73,8 @@ class DetectionValidator(BaseValidator):
             if isinstance(v, torch.Tensor):
                 batch[k] = v.to(self.device, non_blocking=self.device.type == "cuda")
         batch["img"] = (batch["img"].half() if self.args.half else batch["img"].float()) / 255
+        if "depth_img" in batch:
+            batch["depth_img"] = (batch["depth_img"].half() if self.args.half else batch["depth_img"].float()) / 255
         return batch
 
     def init_metrics(self, model: torch.nn.Module) -> None:
