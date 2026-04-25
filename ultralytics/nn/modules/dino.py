@@ -84,10 +84,14 @@ class DINOBackbone(nn.Module):
         self.register_buffer("image_mean", mean, persistent=False)
         self.register_buffer("image_std", std, persistent=False)
 
-        if not train_backbone:
+        self.set_backbone_trainable(train_backbone)
+
+    def set_backbone_trainable(self, trainable: bool):
+        """Set whether the wrapped DINOv3 backbone participates in training."""
+        for p in self.backbone.parameters():
+            p.requires_grad_(trainable)
+        if not trainable:
             self.backbone.eval()
-            for p in self.backbone.parameters():
-                p.requires_grad_(False)
 
     def _build_dinov3_backbone(self) -> nn.Module:
         if not self.repo_dir.exists():

@@ -9,7 +9,7 @@ max_channels: 1024
 
 backbone:
   # [from, repeats, module, args]
-  - [-1, 1, DINOBackbone, ["F:/experiment/dinov3-main", "F:/experiment/dinov3-main/weights/dinov3_vits16.pth", "dinov3_vits16", [256, 512, 1024], true]] # 0: [P3/8, P4/16, P5/32]
+  - [-1, 1, DINOBackbone, ["F:/experiment/dinov3-main", "F:/experiment/dinov3-main/weights/dinov3_vits16.pth", "dinov3_vits16", [256, 512, 1024]]] # 0: [P3/8, P4/16, P5/32]
   - [0, 1, Index, [256, 0]] # 1-P3/8
   - [0, 1, Index, [512, 1]] # 2-P4/16
   - [0, 1, Index, [1024, 2]] # 3-P5/32

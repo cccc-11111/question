@@ -274,8 +274,27 @@ class BaseTrainer:
             if isinstance(self.args.freeze, int)
             else []
         )
+        dino_freeze = getattr(self.args, "dino_freeze", None)
+        dino_backbone_names = [
+            f"{module_name}.backbone"
+            for module_name, module in self.model.named_modules()
+            if module.__class__.__name__ == "DINOBackbone"
+        ]
+        if dino_freeze is not None:
+            for module in self.model.modules():
+                if module.__class__.__name__ == "DINOBackbone":
+                    module.set_backbone_trainable(not dino_freeze)
+
+        params = dict(self.model.named_parameters())
+        dino_freeze_layer_names = []
+        for name in dino_backbone_names:
+            if dino_freeze is True or (
+                dino_freeze is None and any(not p.requires_grad for k, p in params.items() if k.startswith(f"{name}."))
+            ):
+                dino_freeze_layer_names.append(f"{name}.")
+
         always_freeze_names = [".dfl"]  # always freeze these layers
-        freeze_layer_names = [f"model.{x}." for x in freeze_list] + always_freeze_names
+        freeze_layer_names = [f"model.{x}." for x in freeze_list] + dino_freeze_layer_names + always_freeze_names
         self.freeze_layer_names = freeze_layer_names
         for k, v in self.model.named_parameters():
             # v.register_hook(lambda x: torch.nan_to_num(x))  # NaN to 0 (commented for erratic training results)
