@@ -84,55 +84,8 @@ class YOLODataset(BaseDataset):
         self.use_keypoints = task == "pose"
         self.use_obb = task == "obb"
         self.data = data
-        self.depth_roots = self._depth_roots(data or {})
         assert not (self.use_segments and self.use_keypoints), "Can not use both segments and keypoints."
         super().__init__(*args, channels=self.data.get("channels", 3), **kwargs)
-
-    @staticmethod
-    def _depth_roots(data: dict) -> dict[str, Path]:
-        roots = {}
-        for split, keys in {
-            "train": ("depth_train",),
-            "val": ("depth_val", "depth_valid"),
-            "valid": ("depth_valid", "depth_val"),
-            "test": ("depth_test",),
-        }.items():
-            for key in keys:
-                if data.get(key):
-                    roots[split] = Path(data[key])
-                    break
-        return roots
-
-    def _depth_file(self, im_file: str, strict: bool = True) -> Path | None:
-        if not self.depth_roots:
-            return None
-        path = Path(im_file)
-        split = path.parent.name
-        root = self.depth_roots.get(split) or self.depth_roots.get("valid" if split == "val" else split)
-        if root is None:
-            return None
-        for suffix in (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"):
-            candidate = root / f"{path.stem}{suffix}"
-            if candidate.exists():
-                return candidate
-        if strict:
-            raise FileNotFoundError(f"Depth image not found for {im_file} under {root}")
-        return None
-
-    def _read_depth(self, path: Path) -> np.ndarray:
-        depth = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
-        if depth is None:
-            raise FileNotFoundError(f"Unable to read depth image: {path}")
-        depth_channels = int(self.data.get("depth_channels", 0) or 0)
-        if depth_channels == 1 and depth.ndim == 3:
-            depth = cv2.cvtColor(depth, cv2.COLOR_BGR2GRAY)
-        elif depth_channels == 3 and depth.ndim == 2:
-            depth = cv2.cvtColor(depth, cv2.COLOR_GRAY2BGR)
-        if depth.ndim == 2:
-            depth = depth[..., None]
-        elif depth.shape[2] == 4:
-            depth = depth[..., :3]
-        return depth
 
     def cache_labels(self, path: Path = Path("./labels.cache")) -> dict:
         """Cache dataset labels, check images and read shapes.
@@ -229,12 +182,6 @@ class YOLODataset(BaseDataset):
         # Read cache
         [cache.pop(k) for k in ("hash", "version", "msgs")]  # remove items
         labels = cache["labels"]
-        if self.depth_roots:
-            paired_labels = [lb for lb in labels if self._depth_file(lb["im_file"], strict=False) is not None]
-            missing = len(labels) - len(paired_labels)
-            if missing:
-                LOGGER.warning(f"{self.prefix}{missing} images ignored because no paired depth image was found.")
-            labels = paired_labels
         if not labels:
             raise RuntimeError(
                 f"No valid images found in {cache_path}. Images with incorrectly formatted labels are ignored. {HELP_URL}"
@@ -266,10 +213,6 @@ class YOLODataset(BaseDataset):
             (Compose): Composed transforms.
         """
         if self.augment:
-            if self.depth_roots:
-                hyp.mosaic = hyp.copy_paste = hyp.mixup = hyp.cutmix = 0.0
-                hyp.degrees = hyp.translate = hyp.shear = hyp.perspective = 0.0
-                hyp.scale = 0.0
             hyp.mosaic = hyp.mosaic if self.augment and not self.rect else 0.0
             hyp.mixup = hyp.mixup if self.augment and not self.rect else 0.0
             hyp.cutmix = hyp.cutmix if self.augment and not self.rect else 0.0
@@ -351,7 +294,7 @@ class YOLODataset(BaseDataset):
         values = list(zip(*[list(b.values()) for b in batch]))
         for i, k in enumerate(keys):
             value = values[i]
-            if k in {"img", "depth_img", "text_feats"}:
+            if k in {"img", "text_feats"}:
                 value = torch.stack(value, 0)
             elif k == "visuals":
                 value = torch.nn.utils.rnn.pad_sequence(value, batch_first=True)

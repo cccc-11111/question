@@ -61,6 +61,7 @@ class SegmentationValidator(DetectionValidator):
         """
         batch = super().preprocess(batch)
         batch["masks"] = batch["masks"].float()
+        self.batch_imgsz = tuple(batch["img"].shape[2:])
         return batch
 
     def init_metrics(self, model: torch.nn.Module) -> None:
@@ -102,14 +103,16 @@ class SegmentationValidator(DetectionValidator):
         """
         proto = preds[1][-1] if len(preds[1]) == 3 else preds[1]  # second output is len 3 if pt, but only 1 if exported
         preds = super().postprocess(preds[0])
-        imgsz = [4 * x for x in proto.shape[2:]]  # get image size from proto
+        proto_shape = tuple(proto.shape[2:])
+        imgsz = getattr(self, "batch_imgsz", tuple(4 * x for x in proto_shape))
+        self.mask_shape = imgsz if self.process is ops.process_mask_native else proto_shape
         for i, pred in enumerate(preds):
             coefficient = pred.pop("extra")
             pred["masks"] = (
                 self.process(proto[i], coefficient, pred["bboxes"], shape=imgsz)
                 if coefficient.shape[0]
                 else torch.zeros(
-                    (0, *(imgsz if self.process is ops.process_mask_native else proto.shape[2:])),
+                    (0, *self.mask_shape),
                     dtype=torch.uint8,
                     device=pred["bboxes"].device,
                 )
@@ -135,7 +138,13 @@ class SegmentationValidator(DetectionValidator):
         else:
             masks = batch["masks"][batch["batch_idx"] == si]
         if nl:
-            mask_size = [s if self.process is ops.process_mask_native else s // 4 for s in prepared_batch["imgsz"]]
+            mask_size = getattr(
+                self,
+                "mask_shape",
+                tuple(
+                    s if self.process is ops.process_mask_native else s // 4 for s in prepared_batch["imgsz"]
+                ),
+            )
             if masks.shape[1:] != mask_size:
                 masks = F.interpolate(masks[None], mask_size, mode="bilinear", align_corners=False)[0]
                 masks = masks.gt_(0.5)

@@ -3,7 +3,7 @@ from swanlab.integration.ultralytics import add_swanlab_callback
 
 
 if __name__ == "__main__":
-    model = YOLO("/root/workspace/experiment/yolo/ultralytics/cfg/models/11/yolo11-dinov3-depth-seg.yaml")
+    model = YOLO("F:\YOLO\YOLO_custom\yolo-dinobackbone(convnext)-bypassdepth\config\yolo11-dinov3-seg-P2.yaml")
 
     add_swanlab_callback(
         model,

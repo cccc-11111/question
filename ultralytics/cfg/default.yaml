@@ -36,6 +36,7 @@ amp: True # (bool) Automatic Mixed Precision (AMP) training; True runs AMP capab
 fraction: 1.0 # (float) fraction of training dataset to use (1.0 = all)
 profile: False # (bool) profile ONNX/TensorRT speeds during training for loggers
 freeze: # (int | list, optional) freeze first N layers (int) or specific layer indices (list)
+dino_freeze: # (bool, optional) freeze DINOBackbone parameters; overrides model YAML train_backbone when set
 multi_scale: False # (bool) multiscale training by varying image size
 compile: False # (bool | str) enable torch.compile() backend='inductor'; True="default", False=off, or "default|reduce-overhead|max-autotune-no-cudagraphs"
 
@@ -92,7 +93,6 @@ nms: False # (bool) fuse NMS into exported model when backend supports; if True,
 
 # Hyperparameters ------------------------------------------------------------------------------------------------------
 lr0: 0.01 # (float) initial learning rate (SGD=1e-2, Adam/AdamW=1e-3)
-dino_freeze: # (bool, optional) freeze DINOBackbone backbone parameters; overrides model YAML train_backbone when set
 dino_lr0: # (float, optional) initial learning rate for trainable DINOBackbone parameters
 lrf: 0.01 # (float) final LR fraction; final LR = lr0 * lrf
 momentum: 0.937 # (float) SGD momentum or Adam beta1

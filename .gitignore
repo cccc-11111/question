@@ -1,0 +1,9 @@
+weights/
+runs/
+depth_data/
+*.pt
+*.safetensors
+
+__pycache__/
+*.py[cod]
+*.cache

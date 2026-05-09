@@ -209,8 +209,7 @@ class BaseValidator:
 
             # Inference
             with dt[1]:
-                inputs = (batch["img"], batch["depth_img"]) if "depth_img" in batch else batch["img"]
-                preds = model(inputs, augment=augment)
+                preds = model(batch["img"], augment=augment)
 
             # Loss
             with dt[2]:

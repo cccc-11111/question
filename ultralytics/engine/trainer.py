@@ -261,6 +261,10 @@ class BaseTrainer:
         """Build dataloaders and optimizer on correct rank process."""
         ckpt = self.setup_model()
         self.model = self.model.to(self.device)
+        if self.args.dino_freeze is not None:
+            for module in self.model.modules():
+                if module.__class__.__name__ == "DINOBackbone":
+                    module.set_backbone_trainable(not self.args.dino_freeze)
         self.set_model_attributes()
 
         # Compile model
@@ -274,27 +278,8 @@ class BaseTrainer:
             if isinstance(self.args.freeze, int)
             else []
         )
-        dino_freeze = getattr(self.args, "dino_freeze", None)
-        dino_backbone_names = [
-            f"{module_name}.backbone"
-            for module_name, module in self.model.named_modules()
-            if module.__class__.__name__ == "DINOBackbone"
-        ]
-        if dino_freeze is not None:
-            for module in self.model.modules():
-                if module.__class__.__name__ == "DINOBackbone":
-                    module.set_backbone_trainable(not dino_freeze)
-
-        params = dict(self.model.named_parameters())
-        dino_freeze_layer_names = []
-        for name in dino_backbone_names:
-            if dino_freeze is True or (
-                dino_freeze is None and any(not p.requires_grad for k, p in params.items() if k.startswith(f"{name}."))
-            ):
-                dino_freeze_layer_names.append(f"{name}.")
-
         always_freeze_names = [".dfl"]  # always freeze these layers
-        freeze_layer_names = [f"model.{x}." for x in freeze_list] + dino_freeze_layer_names + always_freeze_names
+        freeze_layer_names = [f"model.{x}." for x in freeze_list] + always_freeze_names
         self.freeze_layer_names = freeze_layer_names
         for k, v in self.model.named_parameters():
             # v.register_hook(lambda x: torch.nan_to_num(x))  # NaN to 0 (commented for erratic training results)
@@ -435,8 +420,7 @@ class BaseTrainer:
                     batch = self.preprocess_batch(batch)
                     if self.args.compile:
                         # Decouple inference and loss calculations for improved compile performance
-                        inputs = (batch["img"], batch["depth_img"]) if "depth_img" in batch else batch["img"]
-                        preds = self.model(inputs)
+                        preds = self.model(batch["img"])
                         loss, self.loss_items = unwrap_model(self.model).loss(batch, preds)
                     else:
                         loss, self.loss_items = self.model(batch)
@@ -600,6 +584,29 @@ class BaseTrainer:
         """Save model training checkpoints with additional metadata."""
         import io
 
+        def sanitize_checkpoint_model(model):
+            """Remove runtime hooks from a checkpoint copy so torch.save can pickle it."""
+            for module in model.modules():
+                for name in (
+                    "_forward_hooks",
+                    "_forward_hooks_with_kwargs",
+                    "_forward_hooks_always_called",
+                    "_forward_pre_hooks",
+                    "_forward_pre_hooks_with_kwargs",
+                    "_backward_hooks",
+                    "_backward_pre_hooks",
+                    "_state_dict_hooks",
+                    "_state_dict_pre_hooks",
+                    "_load_state_dict_pre_hooks",
+                    "_load_state_dict_post_hooks",
+                ):
+                    hooks = getattr(module, name, None)
+                    if hooks is not None:
+                        hooks.clear()
+            return model
+
+        ema = sanitize_checkpoint_model(deepcopy(unwrap_model(self.ema.ema))).half()
+
         # Serialize ckpt to a byte buffer once (faster than repeated torch.save() calls)
         buffer = io.BytesIO()
         torch.save(
@@ -607,7 +614,7 @@ class BaseTrainer:
                 "epoch": self.epoch,
                 "best_fitness": self.best_fitness,
                 "model": None,  # resume and final checkpoints derive from EMA
-                "ema": deepcopy(unwrap_model(self.ema.ema)).half(),
+                "ema": ema,
                 "updates": self.ema.updates,
                 "optimizer": convert_optimizer_state_dict_to_fp16(deepcopy(self.optimizer.state_dict())),
                 "scaler": self.scaler.state_dict(),
@@ -936,18 +943,9 @@ class BaseTrainer:
             name, lr, momentum = ("SGD", 0.01, 0.9) if iterations > 10000 else ("AdamW", lr_fit, 0.9)
             self.args.warmup_bias_lr = 0.0  # no higher than 0.01 for Adam
 
-        dino_names = {
-            f"{module_name}.backbone"
-            for module_name, module in model.named_modules()
-            if module.__class__.__name__ == "DINOBackbone"
-        }
-        dino_lr0 = getattr(self.args, "dino_lr0", None)
         for module_name, module in model.named_modules():
-            is_dino = any(module_name == name or module_name.startswith(f"{name}.") for name in dino_names)
-            groups = gd if is_dino else g
+            groups = gd if module.__class__.__name__ == "DINOBackbone" or ".backbone." in module_name and module_name.startswith("model.0") else g
             for param_name, param in module.named_parameters(recurse=False):
-                if not param.requires_grad:
-                    continue
                 fullname = f"{module_name}.{param_name}" if module_name else param_name
                 if "bias" in fullname:  # bias (no decay)
                     groups[2].append(param)
@@ -973,8 +971,8 @@ class BaseTrainer:
 
         optimizer.add_param_group({"params": g[0], "weight_decay": decay})  # add g0 with weight_decay
         optimizer.add_param_group({"params": g[1], "weight_decay": 0.0})  # add g1 (BatchNorm2d weights)
+        dino_lr = self.args.dino_lr0 if self.args.dino_lr0 is not None else lr
         if any(gd):
-            dino_lr = float(dino_lr0) if dino_lr0 is not None else lr
             if gd[2]:
                 optimizer.add_param_group({"params": gd[2], "lr": dino_lr, "weight_decay": 0.0})
             if gd[0]:
@@ -986,10 +984,5 @@ class BaseTrainer:
             f"{len(g[1])} weight(decay=0.0), {len(g[0])} weight(decay={decay}), {len(g[2])} bias(decay=0.0)"
         )
         if any(gd):
-            dino_lr_source = f"dino_lr0={dino_lr0:g}" if dino_lr0 is not None else "lr0"
-            LOGGER.info(
-                f"{colorstr('optimizer:')} DINOBackbone lr={dino_lr:g} "
-                f"({dino_lr_source}) with parameter groups "
-                f"{len(gd[1])} weight(decay=0.0), {len(gd[0])} weight(decay={decay}), {len(gd[2])} bias(decay=0.0)"
-            )
+            LOGGER.info(f"{colorstr('optimizer:')} DINOBackbone lr={dino_lr:g}")
         return optimizer
