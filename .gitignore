@@ -1,6 +1,5 @@
 weights/
 runs/
-depth_data/
 *.pt
 *.safetensors
 
