@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 from collections import defaultdict
 from itertools import repeat
@@ -86,6 +87,8 @@ class YOLODataset(BaseDataset):
         self.data = data
         assert not (self.use_segments and self.use_keypoints), "Can not use both segments and keypoints."
         super().__init__(*args, channels=self.data.get("channels", 3), **kwargs)
+        self.depth_channels = int(self.data.get("depth_channels", 0) or 0)
+        self.depth_files = self._match_depth_files() if self.depth_channels else []
 
     def cache_labels(self, path: Path = Path("./labels.cache")) -> dict:
         """Cache dataset labels, check images and read shapes.
@@ -213,6 +216,9 @@ class YOLODataset(BaseDataset):
             (Compose): Composed transforms.
         """
         if self.augment:
+            if self.data.get("depth_channels"):
+                for name in ("mosaic", "mixup", "cutmix", "copy_paste"):
+                    setattr(hyp, name, 0.0)
             hyp.mosaic = hyp.mosaic if self.augment and not self.rect else 0.0
             hyp.mixup = hyp.mixup if self.augment and not self.rect else 0.0
             hyp.cutmix = hyp.cutmix if self.augment and not self.rect else 0.0
@@ -233,6 +239,65 @@ class YOLODataset(BaseDataset):
             )
         )
         return transforms
+
+    def _match_depth_files(self) -> list[str]:
+        """Match each RGB image with the corresponding aligned depth image by relative path, filename, or stem."""
+        depth_root = self._depth_root_for_split()
+        if not depth_root:
+            return []
+
+        depth_root = Path(depth_root)
+        depth_files = [p for p in depth_root.rglob("*") if p.is_file()]
+        depth_index = {p.name.lower(): p for p in depth_files}
+        depth_stem_index = {p.stem.lower(): p for p in depth_files}
+        image_root = Path(self.img_path[0] if isinstance(self.img_path, list) else self.img_path)
+        matched = []
+        for im_file in self.im_files:
+            im_path = Path(im_file)
+            candidates = []
+            with contextlib.suppress(ValueError):
+                rel_path = im_path.relative_to(image_root)
+                rel_depth = depth_root / rel_path
+                candidates.append(rel_depth)
+                candidates.extend(rel_depth.with_suffix(s) for s in (".png", ".jpg", ".jpeg"))
+            candidates.append(depth_root / im_path.name)
+            candidates.append(depth_index.get(im_path.name.lower()))
+            candidates.append(depth_stem_index.get(im_path.stem.lower()))
+            depth_file = next((p for p in candidates if p and p.exists()), None)
+            if depth_file is None:
+                raise FileNotFoundError(f"No matching depth image found for {im_file} under {depth_root}")
+            matched.append(str(depth_file))
+        return matched
+
+    def _depth_root_for_split(self) -> str | None:
+        """Return the configured depth directory that corresponds to the current RGB split path."""
+        img_path = self.img_path[0] if isinstance(self.img_path, list) else self.img_path
+        img_path = str(Path(img_path).resolve())
+        for split, depth_key in (("train", "depth_train"), ("val", "depth_valid"), ("test", "depth_test")):
+            split_path = self.data.get(split)
+            if split_path and depth_key in self.data and img_path == str(Path(split_path).resolve()):
+                return self.data[depth_key]
+        for depth_key in ("depth_train", "depth_valid", "depth_test"):
+            if depth_key in self.data and depth_key.replace("depth_", "") in img_path:
+                return self.data[depth_key]
+        return self.data.get("depth_train")
+
+    def load_depth_image(self, index: int) -> np.ndarray:
+        """Load the aligned depth image for a sample."""
+        flag = cv2.IMREAD_GRAYSCALE if self.depth_channels == 1 else cv2.IMREAD_COLOR
+        depth = cv2.imread(self.depth_files[index], flag)
+        if depth is None:
+            raise FileNotFoundError(f"Depth Image Not Found {self.depth_files[index]}")
+        if depth.ndim == 2:
+            depth = depth[..., None]
+        return depth
+
+    def get_image_and_label(self, index: int) -> dict[str, Any]:
+        """Get image, optional depth image, and labels for the dataset index."""
+        label = super().get_image_and_label(index)
+        if self.depth_files:
+            label["depth_img"] = self.load_depth_image(index)
+        return label
 
     def close_mosaic(self, hyp: dict) -> None:
         """Disable mosaic, copy_paste, mixup and cutmix augmentations by setting their probabilities to 0.0.
@@ -294,7 +359,7 @@ class YOLODataset(BaseDataset):
         values = list(zip(*[list(b.values()) for b in batch]))
         for i, k in enumerate(keys):
             value = values[i]
-            if k in {"img", "text_feats"}:
+            if k in {"img", "depth_img", "text_feats"}:
                 value = torch.stack(value, 0)
             elif k == "visuals":
                 value = torch.nn.utils.rnn.pad_sequence(value, batch_first=True)

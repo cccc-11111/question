@@ -7,3 +7,5 @@ depth_data/
 __pycache__/
 *.py[cod]
 *.cache
+
+mask/.ultralytics_config/

@@ -1295,9 +1295,21 @@ class RandomPerspective:
 
         border = labels.pop("mosaic_border", self.border)
         self.size = img.shape[1] + border[1] * 2, img.shape[0] + border[0] * 2  # w, h
+        depth_img = labels.get("depth_img")
         # M is affine matrix
         # Scale for func:`box_candidates`
         img, M, scale = self.affine_transform(img, border)
+        if depth_img is not None:
+            if depth_img.shape[:2] != labels["img"].shape[:2] and self.pre_transform and "mosaic_border" not in labels:
+                depth_img = LetterBox(new_shape=labels["img"].shape[:2])(image=depth_img)
+            if (border[0] != 0) or (border[1] != 0) or (M != np.eye(3)).any():
+                border_value = (114,) * depth_img.shape[2]
+                if self.perspective:
+                    depth_img = cv2.warpPerspective(depth_img, M, dsize=self.size, borderValue=border_value)
+                else:
+                    depth_img = cv2.warpAffine(depth_img, M[:2], dsize=self.size, borderValue=border_value)
+                if depth_img.ndim == 2:
+                    depth_img = depth_img[..., None]
 
         bboxes = self.apply_bboxes(instances.bboxes, M)
 
@@ -1322,6 +1334,8 @@ class RandomPerspective:
         labels["instances"] = new_instances[i]
         labels["cls"] = cls[i]
         labels["img"] = img
+        if depth_img is not None:
+            labels["depth_img"] = depth_img
         labels["resized_shape"] = img.shape[:2]
         return labels
 
@@ -1526,17 +1540,26 @@ class RandomFlip:
         w = 1 if instances.normalized else w
 
         # WARNING: two separate if and calls to random.random() intentional for reproducibility with older versions
-        if self.direction == "vertical" and random.random() < self.p:
+        depth_img = labels.get("depth_img")
+        do_vertical = self.direction == "vertical" and random.random() < self.p
+        do_horizontal = self.direction == "horizontal" and random.random() < self.p
+        if do_vertical:
             img = np.flipud(img)
+            if depth_img is not None:
+                depth_img = np.flipud(depth_img)
             instances.flipud(h)
             if self.flip_idx is not None and instances.keypoints is not None:
                 instances.keypoints = np.ascontiguousarray(instances.keypoints[:, self.flip_idx, :])
-        if self.direction == "horizontal" and random.random() < self.p:
+        if do_horizontal:
             img = np.fliplr(img)
+            if depth_img is not None:
+                depth_img = np.fliplr(depth_img)
             instances.fliplr(w)
             if self.flip_idx is not None and instances.keypoints is not None:
                 instances.keypoints = np.ascontiguousarray(instances.keypoints[:, self.flip_idx, :])
         labels["img"] = np.ascontiguousarray(img)
+        if depth_img is not None:
+            labels["depth_img"] = np.ascontiguousarray(depth_img)
         labels["instances"] = instances
         return labels
 
@@ -1667,6 +1690,16 @@ class LetterBox:
             img = cv2.resize(img, new_unpad, interpolation=self.interpolation)
             if img.ndim == 2:
                 img = img[..., None]
+        depth_img = labels.get("depth_img")
+        if depth_img is not None:
+            if depth_img.shape[:2] != shape:
+                depth_img = cv2.resize(depth_img, (shape[1], shape[0]), interpolation=self.interpolation)
+                if depth_img.ndim == 2:
+                    depth_img = depth_img[..., None]
+            if shape[::-1] != new_unpad:
+                depth_img = cv2.resize(depth_img, new_unpad, interpolation=self.interpolation)
+                if depth_img.ndim == 2:
+                    depth_img = depth_img[..., None]
 
         top, bottom = round(dh - 0.1) if self.center else 0, round(dh + 0.1)
         left, right = round(dw - 0.1) if self.center else 0, round(dw + 0.1)
@@ -1679,6 +1712,13 @@ class LetterBox:
             pad_img = np.full((h + top + bottom, w + left + right, c), fill_value=self.padding_value, dtype=img.dtype)
             pad_img[top : top + h, left : left + w] = img
             img = pad_img
+        if depth_img is not None:
+            dh0, dw0, dc = depth_img.shape
+            pad_depth = np.full(
+                (dh0 + top + bottom, dw0 + left + right, dc), fill_value=self.padding_value, dtype=depth_img.dtype
+            )
+            pad_depth[top : top + dh0, left : left + dw0] = depth_img
+            depth_img = pad_depth
 
         if labels.get("ratio_pad"):
             labels["ratio_pad"] = (labels["ratio_pad"], (left, top))  # for evaluation
@@ -1686,6 +1726,8 @@ class LetterBox:
         if len(labels):
             labels = self._update_labels(labels, ratio, left, top)
             labels["img"] = img
+            if depth_img is not None:
+                labels["depth_img"] = depth_img
             labels["resized_shape"] = new_shape
             return labels
         else:
@@ -2143,6 +2185,8 @@ class Format:
                 )
             labels["masks"] = masks
         labels["img"] = self._format_img(img)
+        if "depth_img" in labels:
+            labels["depth_img"] = self._format_depth(labels["depth_img"])
         labels["cls"] = torch.from_numpy(cls) if nl else torch.zeros(nl, 1)
         labels["bboxes"] = torch.from_numpy(instances.bboxes) if nl else torch.zeros((nl, 4))
         if self.return_keypoint:
@@ -2194,6 +2238,14 @@ class Format:
         img = np.ascontiguousarray(img[::-1] if random.uniform(0, 1) > self.bgr and img.shape[0] == 3 else img)
         img = torch.from_numpy(img)
         return img
+
+    @staticmethod
+    def _format_depth(depth_img: np.ndarray) -> torch.Tensor:
+        """Format an aligned depth image without color-channel reversal."""
+        if len(depth_img.shape) < 3:
+            depth_img = np.expand_dims(depth_img, -1)
+        depth_img = np.ascontiguousarray(depth_img.transpose(2, 0, 1))
+        return torch.from_numpy(depth_img)
 
     def _format_segments(
         self, instances: Instances, cls: np.ndarray, w: int, h: int
