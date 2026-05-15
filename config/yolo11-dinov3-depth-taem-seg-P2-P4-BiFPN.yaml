@@ -1,0 +1,35 @@
+# Ultralytics AGPL-3.0 License - https://ultralytics.com/license
+
+# YOLO11 instance segmentation model with RGB DINOv3 ConvNeXt-Base features,
+# aligned depth bypass features, per-level TAEM fusion at P2/P3/P4, and BiFPN.
+# P5 is intentionally not used by the neck or segmentation head.
+
+nc: 80
+depth_multiple: 0.50
+width_multiple: 0.50
+max_channels: 1024
+
+backbone:
+  # [from, repeats, module, args]
+  # DINOBackbone needs four outputs to expose real ConvNeXt P2/P3/P4/P5 stages;
+  # only P2/P3/P4 are indexed below.
+  - [-1, 1, DINOBackbone, ["weights/dinov3_convnext_base", "weights/dinov3_convnext_base/dinov3_convnext_base.safetensors", "dinov3_convnext_base", [128, 256, 512, 1024]]] # 0: RGB -> [P2/4, P3/8, P4/16, P5/32]
+  - [-1, 1, BypassCNN, ["auto", 64, [0, 1, 2]]] # 1: depth(1ch or 3ch) -> [P2/4, P3/8, P4/16]
+  - [0, 1, Index, [128, 0]] # 2-DINO P2/4
+  - [0, 1, Index, [256, 1]] # 3-DINO P3/8
+  - [0, 1, Index, [512, 2]] # 4-DINO P4/16
+  - [1, 1, Index, [128, 0]] # 5-depth P2/4
+  - [1, 1, Index, [256, 1]] # 6-depth P3/8
+  - [1, 1, Index, [512, 2]] # 7-depth P4/16
+  - [[2, 5], 1, TAEM, [16, "sum", "avg_max"]] # 8-TAEM fused P2/4
+  - [[3, 6], 1, TAEM, [16, "sum", "avg_max"]] # 9-TAEM fused P3/8
+  - [[4, 7], 1, TAEM, [16, "sum", "avg_max"]] # 10-TAEM fused P4/16
+
+head:
+  # BiFPN(TAEM P2, TAEM P3, TAEM P4) -> [P2_out, P3_out, P4_out]
+  - [[8, 9, 10], 1, BiFPN, [[128, 256, 512]]] # 11
+  - [11, 1, Index, [128, 0]] # 12-P2/4
+  - [11, 1, Index, [256, 1]] # 13-P3/8
+  - [11, 1, Index, [512, 2]] # 14-P4/16
+
+  - [[12, 13, 14], 1, Segment, [nc, 32, 256]] # Segment(P2, P3, P4)

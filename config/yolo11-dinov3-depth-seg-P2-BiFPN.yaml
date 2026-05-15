@@ -1,0 +1,34 @@
+# Ultralytics AGPL-3.0 License - https://ultralytics.com/license
+
+# YOLO11 instance segmentation model with a RGB-only DINOv3 ConvNeXt-Base backbone,
+# an aligned depth-image CNN bypass, and a registered BiFPN neck.
+
+nc: 80
+depth_multiple: 0.50
+width_multiple: 0.50
+max_channels: 1024
+
+backbone:
+  # [from, repeats, module, args]
+  - [-1, 1, DINOBackbone, ["weights/dinov3_convnext_base", "weights/dinov3_convnext_base/dinov3_convnext_base.safetensors", "dinov3_convnext_base", [128, 256, 512, 1024]]] # 0: RGB -> [P2/4, P3/8, P4/16, P5/32]
+  - [-1, 1, BypassCNN, [3, 64]] # 1: depth -> [P2/4, P3/8]
+  - [0, 1, Index, [128, 0]] # 2-DINO P2/4
+  - [0, 1, Index, [256, 1]] # 3-DINO P3/8
+  - [0, 1, Index, [512, 2]] # 4-DINO P4/16
+  - [0, 1, Index, [1024, 3]] # 5-DINO P5/32
+  - [1, 1, Index, [128, 0]] # 6-depth P2/4
+  - [1, 1, Index, [256, 1]] # 7-depth P3/8
+  - [[2, 6], 1, Concat, [1]] # 8-fuse DINO P2 + depth P2
+  - [-1, 2, C3k2, [128, False]] # 9-fused P2/4
+  - [[3, 7], 1, Concat, [1]] # 10-fuse DINO P3 + depth P3
+  - [-1, 2, C3k2, [256, False]] # 11-fused P3/8
+
+head:
+  # BiFPN(fused P2, fused P3, DINO P4, DINO P5) -> [P2_out, P3_out, P4_out, P5_out]
+  - [[9, 11, 4, 5], 1, BiFPN, [[128, 256, 512, 1024]]] # 12
+  - [12, 1, Index, [128, 0]] # 13-P2/4
+  - [12, 1, Index, [256, 1]] # 14-P3/8
+  - [12, 1, Index, [512, 2]] # 15-P4/16
+  - [12, 1, Index, [1024, 3]] # 16-P5/32
+
+  - [[13, 14, 15, 16], 1, Segment, [nc, 32, 256]] # Segment(P2, P3, P4, P5)

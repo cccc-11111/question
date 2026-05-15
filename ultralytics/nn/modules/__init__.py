@@ -76,8 +76,11 @@ from .conv import (
     RepConv,
     SpatialAttention,
 )
+from .afm import AFM
+from .bifpn import BiFPN
 from .bypass import BypassCNN
 from .dino import DINOBackbone
+from .taem import TAEM
 from .head import (
     OBB,
     Classify,
@@ -124,10 +127,12 @@ __all__ = (
     "A2C2f",
     "AConv",
     "ADown",
+    "AFM",
     "Attention",
     "BNContrastiveHead",
     "Bottleneck",
     "BottleneckCSP",
+    "BiFPN",
     "BypassCNN",
     "C2f",
     "C2fAttn",
@@ -175,6 +180,7 @@ __all__ = (
     "SCDown",
     "Segment",
     "SpatialAttention",
+    "TAEM",
     "TorchVision",
     "TransformerBlock",
     "TransformerEncoderLayer",

@@ -1,8 +1,8 @@
 
-path: /root/workspace/experiment/yolo/seg_data_yolo/images
-train: /root/workspace/experiment/yolo/seg_data_yolo/images/train
-val: /root/workspace/experiment/yolo/seg_data_yolo/images/val
-test: /root/workspace/experiment/yolo/seg_data_yolo/images/test 
+path: /root/workspace/experiment/dataset/data/images
+train: /root/workspace/experiment/dataset/data/images/train
+val: /root/workspace/experiment/dataset/data/images/val
+test: /root/workspace/experiment/dataset/data/images/test 
 
 # Classes
 names:

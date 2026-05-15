@@ -27,6 +27,8 @@ from ultralytics.nn.modules import (
     A2C2f,
     AConv,
     ADown,
+    AFM,
+    BiFPN,
     Bottleneck,
     BottleneckCSP,
     BypassCNN,
@@ -65,6 +67,7 @@ from ultralytics.nn.modules import (
     RTDETRDecoder,
     SCDown,
     Segment,
+    TAEM,
     TorchVision,
     WorldDetect,
     YOLOEDetect,
@@ -410,7 +413,16 @@ class DetectionModel(BaseModel):
 
             self.model.eval()  # Avoid changing batch statistics until training begins
             m.training = True  # Setting it to True to properly return strides
-            m.stride = torch.tensor([s / x.shape[-2] for x in _forward(torch.zeros(1, ch, s, s))])  # forward
+            dummy_input = torch.zeros(1, ch, s, s)
+            bypass = next((layer for layer in self.model if isinstance(layer, BypassCNN)), None)
+            if bypass is not None:
+                depth_ch = (
+                    bypass.dummy_input_channels()
+                    if hasattr(bypass, "dummy_input_channels")
+                    else bypass.stem[0].in_channels
+                )
+                dummy_input = (dummy_input, torch.zeros(1, depth_ch, s, s))
+            m.stride = torch.tensor([s / x.shape[-2] for x in _forward(dummy_input)])  # forward
             self.stride = m.stride
             self.model.train()  # Set model back to training(default) mode
             m.bias_init()  # only run once
@@ -1620,7 +1632,28 @@ def parse_model(d, ch, verbose=True):
         elif m is DINOBackbone:
             c2 = args[3] if len(args) > 3 else [256, 512, 1024]
         elif m is BypassCNN:
-            c2 = [args[1] * 2, args[1] * 4] if len(args) > 1 else [128, 256]
+            channel = args[1] if len(args) > 1 else 64
+            out_indices = args[2] if len(args) > 2 else (0, 1)
+            all_channels = [channel * 2, channel * 4, channel * 8, channel * 16]
+            c2 = [all_channels[x] for x in out_indices]
+        elif m is BiFPN:
+            c1 = [ch[x] for x in f]
+            c2 = args[0] if args else c1
+            args = [c1, *args]
+        elif m is TAEM:
+            c1 = [ch[x] for x in f] if isinstance(f, list) else [ch[f]]
+            if len(c1) != 2:
+                raise ValueError("TAEM expects exactly two input feature maps: [rgb_feature, depth_feature]")
+            if c1[0] != c1[1]:
+                raise ValueError(f"TAEM input channels must match, got {c1}")
+            c2 = c1[0]
+            args = [c2, *args]
+        elif m is AFM:
+            c1 = [ch[x] for x in f] if isinstance(f, list) else [ch[f]]
+            if len(c1) != 2:
+                raise ValueError("AFM expects exactly two input feature maps: [rgb_feature, depth_feature]")
+            c2 = c1[0]
+            args = [c1[0], c1[1], c2, *args]
         elif m is AIFI:
             args = [ch[f], *args]
         elif m in frozenset({HGStem, HGBlock}):

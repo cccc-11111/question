@@ -1,0 +1,35 @@
+# Ultralytics AGPL-3.0 License - https://ultralytics.com/license
+
+# YOLO11 instance segmentation model with RGB DINOv3 ConvNeXt-Base features,
+# aligned depth bypass features, per-level AFM fusion at P3/P4/P5, and BiFPN.
+
+nc: 80
+depth_multiple: 0.50
+width_multiple: 0.50
+max_channels: 1024
+
+backbone:
+  # [from, repeats, module, args]
+  - [-1, 1, DINOBackbone, ["weights/dinov3_convnext_base", "weights/dinov3_convnext_base/dinov3_convnext_base.safetensors", "dinov3_convnext_base", [128, 256, 512, 1024]]] # 0: RGB -> [P2/4, P3/8, P4/16, P5/32]
+  - [-1, 1, BypassCNN, ["auto", 64, [0, 1, 2, 3]]] # 1: depth(1ch or 3ch) -> [P2/4, P3/8, P4/16, P5/32]
+  - [0, 1, Index, [128, 0]] # 2-DINO P2/4
+  - [0, 1, Index, [256, 1]] # 3-DINO P3/8
+  - [0, 1, Index, [512, 2]] # 4-DINO P4/16
+  - [0, 1, Index, [1024, 3]] # 5-DINO P5/32
+  - [1, 1, Index, [128, 0]] # 6-depth P2/4
+  - [1, 1, Index, [256, 1]] # 7-depth P3/8
+  - [1, 1, Index, [512, 2]] # 8-depth P4/16
+  - [1, 1, Index, [1024, 3]] # 9-depth P5/32
+  - [[3, 7], 1, AFM, [16, [1, 4, 7], true]] # 10-AFM fused P3/8
+  - [[4, 8], 1, AFM, [16, [1, 4, 7], true]] # 11-AFM fused P4/16
+  - [[5, 9], 1, AFM, [16, [1, 4, 7], true]] # 12-AFM fused P5/32
+
+head:
+  # BiFPN(DINO P2, AFM P3, AFM P4, AFM P5) -> [P2_out, P3_out, P4_out, P5_out]
+  - [[2, 10, 11, 12], 1, BiFPN, [[128, 256, 512, 1024]]] # 13
+  - [13, 1, Index, [128, 0]] # 14-P2/4
+  - [13, 1, Index, [256, 1]] # 15-P3/8
+  - [13, 1, Index, [512, 2]] # 16-P4/16
+  - [13, 1, Index, [1024, 3]] # 17-P5/32
+
+  - [[14, 15, 16, 17], 1, Segment, [nc, 32, 256]] # Segment(P2, P3, P4, P5)
