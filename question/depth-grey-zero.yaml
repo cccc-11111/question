@@ -1,0 +1,18 @@
+# Zero-depth ablation for config/yolo11-dinov3-depth-afmP3~P5-seg-P2-BiFPN.yaml.
+model: ../config/yolo11-dinov3-depth-afmP3~P5-seg-P2-BiFPN.yaml
+
+path: F:/YOLO/YOLO_custom/datasets/data
+train: images/train
+val: images/val
+test: images/test
+
+depth_train: F:/YOLO/YOLO_custom/datasets/depth_grey_data_metric/train
+depth_valid: F:/YOLO/YOLO_custom/datasets/depth_grey_data_metric/valid
+depth_test: F:/YOLO/YOLO_custom/datasets/depth_grey_data_metric/test
+depth_channels: 1
+depth_mode: zero
+
+names:
+  0: bud
+  1: leaf
+  2: flower

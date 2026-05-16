@@ -1,0 +1,21 @@
+{
+  "settings_version": "0.0.6",
+  "datasets_dir": "F:\\YOLO\\YOLO_custom\\datasets",
+  "weights_dir": "F:\\YOLO\\YOLO_custom\\yolo-convnext-P2-BiFPN\\weights",
+  "runs_dir": "F:\\YOLO\\YOLO_custom\\yolo-convnext-P2-BiFPN\\runs",
+  "uuid": "545bb43f6bb70eae72c8b1b42cad86e3df6461687949459adf52418151101da9",
+  "sync": true,
+  "api_key": "",
+  "openai_api_key": "",
+  "clearml": true,
+  "comet": true,
+  "dvc": true,
+  "hub": true,
+  "mlflow": true,
+  "neptune": true,
+  "raytune": true,
+  "tensorboard": false,
+  "wandb": false,
+  "vscode_msg": true,
+  "openvino_msg": true
+}

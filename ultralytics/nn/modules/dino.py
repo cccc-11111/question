@@ -68,6 +68,8 @@ class DINOBackbone(nn.Module):
         train_backbone: bool = False,
         image_mean: list[float] | tuple[float, float, float] = (0.485, 0.456, 0.406),
         image_std: list[float] | tuple[float, float, float] = (0.229, 0.224, 0.225),
+        uses_original_input: bool = False,
+        input_channels: int = 3,
     ):
         super().__init__()
         supported = {*self._EMBED_DIMS, *self._CONVNEXT_CHANNELS}
@@ -82,6 +84,8 @@ class DINOBackbone(nn.Module):
         self.is_convnext = model_name in self._CONVNEXT_CHANNELS
         self.patch_size = 16
         self.num_outputs = len(out_channels)
+        self.uses_original_input = uses_original_input
+        self.default_input_channels = input_channels
 
         self.backbone = self._build_dinov3_backbone()
         in_channels = self._feature_channels(model_name)
@@ -106,6 +110,9 @@ class DINOBackbone(nn.Module):
             p.requires_grad_(trainable)
         if not trainable:
             self.backbone.eval()
+
+    def dummy_input_channels(self) -> int:
+        return self.default_input_channels
 
     def _build_dinov3_backbone(self) -> nn.Module:
         if not self.repo_dir.exists():

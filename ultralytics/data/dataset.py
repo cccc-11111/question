@@ -88,7 +88,14 @@ class YOLODataset(BaseDataset):
         assert not (self.use_segments and self.use_keypoints), "Can not use both segments and keypoints."
         super().__init__(*args, channels=self.data.get("channels", 3), **kwargs)
         self.depth_channels = int(self.data.get("depth_channels", 0) or 0)
-        self.depth_files = self._match_depth_files() if self.depth_channels else []
+        self.depth_mode = str(self.data.get("depth_mode", "aligned")).lower()
+        if self.depth_channels and self.depth_mode == "zero":
+            self.depth_files = [""] * len(self.im_files)
+            LOGGER.info(f"{self.prefix}Using zero-filled depth images for all samples.")
+        else:
+            self.depth_files = self._match_depth_files() if self.depth_channels else []
+            if self.depth_files and self.depth_mode in {"random_mismatch", "mismatch", "shuffle"}:
+                self.depth_files = self._random_mismatch_depth_files(self.depth_files)
 
     def cache_labels(self, path: Path = Path("./labels.cache")) -> dict:
         """Cache dataset labels, check images and read shapes.
@@ -269,14 +276,54 @@ class YOLODataset(BaseDataset):
             matched.append(str(depth_file))
         return matched
 
+    def _random_mismatch_depth_files(self, depth_files: list[str]) -> list[str]:
+        """Return a deterministic random derangement of matched depth files for RGB-depth mismatch experiments."""
+        if len(depth_files) < 2:
+            LOGGER.warning(f"{self.prefix}Need at least 2 depth images for random mismatch; keeping aligned depth.")
+            return depth_files
+        rng = np.random.default_rng(int(self.data.get("depth_mismatch_seed", 0)))
+        order = rng.permutation(len(depth_files))
+        fixed = np.flatnonzero(order == np.arange(len(order)))
+        if len(fixed) == 1:
+            i = int(fixed[0])
+            choices = np.delete(np.arange(len(order)), i)
+            j = int(rng.choice(choices))
+            order[i], order[j] = order[j], order[i]
+        elif len(fixed) > 1:
+            order[fixed] = np.roll(order[fixed], 1)
+
+        mismatched = [depth_files[i] for i in order]
+        still_aligned = [
+            i
+            for i, (src, dst) in enumerate(zip(depth_files, mismatched))
+            if Path(src).resolve() == Path(dst).resolve()
+        ]
+        if still_aligned:
+            examples = ", ".join(str(i) for i in still_aligned[:5])
+            raise RuntimeError(
+                f"{self.prefix}Random depth mismatch failed: {len(still_aligned)}/{len(depth_files)} samples "
+                f"still use their aligned depth image. Example indices: {examples}"
+            )
+
+        LOGGER.info(
+            f"{self.prefix}Using randomly mismatched RGB-depth pairs: "
+            f"{len(depth_files)}/{len(depth_files)} samples use non-aligned depth."
+        )
+        return mismatched
+
     def _depth_root_for_split(self) -> str | None:
         """Return the configured depth directory that corresponds to the current RGB split path."""
         img_path = self.img_path[0] if isinstance(self.img_path, list) else self.img_path
         img_path = str(Path(img_path).resolve())
+        data_root = Path(self.data.get("path", "."))
         for split, depth_key in (("train", "depth_train"), ("val", "depth_valid"), ("test", "depth_test")):
             split_path = self.data.get(split)
-            if split_path and depth_key in self.data and img_path == str(Path(split_path).resolve()):
-                return self.data[depth_key]
+            if split_path and depth_key in self.data:
+                split_path = Path(split_path)
+                if not split_path.is_absolute():
+                    split_path = data_root / split_path
+                if img_path == str(split_path.resolve()):
+                    return self.data[depth_key]
         for depth_key in ("depth_train", "depth_valid", "depth_test"):
             if depth_key in self.data and depth_key.replace("depth_", "") in img_path:
                 return self.data[depth_key]
@@ -296,7 +343,11 @@ class YOLODataset(BaseDataset):
         """Get image, optional depth image, and labels for the dataset index."""
         label = super().get_image_and_label(index)
         if self.depth_files:
-            label["depth_img"] = self.load_depth_image(index)
+            if self.depth_mode == "zero":
+                label["depth_img"] = np.zeros((*label["img"].shape[:2], self.depth_channels), dtype=label["img"].dtype)
+                label["depth_zero_fill"] = True
+            else:
+                label["depth_img"] = self.load_depth_image(index)
         return label
 
     def close_mosaic(self, hyp: dict) -> None:

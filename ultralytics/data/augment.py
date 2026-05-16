@@ -2187,6 +2187,8 @@ class Format:
         labels["img"] = self._format_img(img)
         if "depth_img" in labels:
             labels["depth_img"] = self._format_depth(labels["depth_img"])
+            if labels.pop("depth_zero_fill", False):
+                labels["depth_img"] = torch.zeros_like(labels["depth_img"])
         labels["cls"] = torch.from_numpy(cls) if nl else torch.zeros(nl, 1)
         labels["bboxes"] = torch.from_numpy(instances.bboxes) if nl else torch.zeros((nl, 4))
         if self.return_keypoint:

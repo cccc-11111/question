@@ -265,6 +265,11 @@ class BaseTrainer:
             for module in self.model.modules():
                 if module.__class__.__name__ == "DINOBackbone":
                     module.set_backbone_trainable(not self.args.dino_freeze)
+        dino_backbone_prefixes = [
+            f"{module_name}.backbone"
+            for module_name, module in self.model.named_modules()
+            if module.__class__.__name__ == "DINOBackbone"
+        ]
         self.set_model_attributes()
 
         # Compile model
@@ -286,6 +291,10 @@ class BaseTrainer:
             if any(x in k for x in freeze_layer_names):
                 LOGGER.info(f"Freezing layer '{k}'")
                 v.requires_grad = False
+            elif self.args.dino_freeze is True and any(
+                k == prefix or k.startswith(f"{prefix}.") for prefix in dino_backbone_prefixes
+            ):
+                continue
             elif not v.requires_grad and v.dtype.is_floating_point:  # only floating point Tensor can require gradients
                 LOGGER.warning(
                     f"setting 'requires_grad=True' for frozen layer '{k}'. "
@@ -943,8 +952,15 @@ class BaseTrainer:
             name, lr, momentum = ("SGD", 0.01, 0.9) if iterations > 10000 else ("AdamW", lr_fit, 0.9)
             self.args.warmup_bias_lr = 0.0  # no higher than 0.01 for Adam
 
+        dino_backbone_prefixes = [
+            f"{module_name}.backbone"
+            for module_name, module in model.named_modules()
+            if module.__class__.__name__ == "DINOBackbone"
+        ]
         for module_name, module in model.named_modules():
-            groups = gd if module.__class__.__name__ == "DINOBackbone" or ".backbone." in module_name and module_name.startswith("model.0") else g
+            groups = gd if any(
+                module_name == prefix or module_name.startswith(f"{prefix}.") for prefix in dino_backbone_prefixes
+            ) else g
             for param_name, param in module.named_parameters(recurse=False):
                 fullname = f"{module_name}.{param_name}" if module_name else param_name
                 if "bias" in fullname:  # bias (no decay)

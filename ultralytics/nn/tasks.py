@@ -414,7 +414,10 @@ class DetectionModel(BaseModel):
             self.model.eval()  # Avoid changing batch statistics until training begins
             m.training = True  # Setting it to True to properly return strides
             dummy_input = torch.zeros(1, ch, s, s)
-            bypass = next((layer for layer in self.model if isinstance(layer, BypassCNN)), None)
+            bypass = next(
+                (layer for layer in self.model if isinstance(layer, BypassCNN) or getattr(layer, "uses_original_input", False)),
+                None,
+            )
             if bypass is not None:
                 depth_ch = (
                     bypass.dummy_input_channels()
