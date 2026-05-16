@@ -429,7 +429,8 @@ class BaseTrainer:
                     batch = self.preprocess_batch(batch)
                     if self.args.compile:
                         # Decouple inference and loss calculations for improved compile performance
-                        preds = self.model(batch["img"])
+                        model_input = (batch["img"], batch["depth_img"]) if "depth_img" in batch else batch["img"]
+                        preds = self.model(model_input)
                         loss, self.loss_items = unwrap_model(self.model).loss(batch, preds)
                     else:
                         loss, self.loss_items = self.model(batch)
